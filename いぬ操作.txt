@@ -1,0 +1,96 @@
+できます。ただし 今のファイルそのままだと失敗しやすい箇所があるので、試す前に以下を確認・修正するのがおすすめです。
+
+事前修正
+1つ目、navigation_command_tcpbridge.py の設定ファイル参照先を直します。
+
+現在:
+
+get_package_share_directory('go2_tcp_toolbox')
+このリポジトリ内で使うなら、例えばこうします。
+
+get_package_share_directory('go2_navigation')
+2つ目、go2_navigation/config/tcp_config.yaml を用意します。
+
+nav_server:
+  host: 127.0.0.1
+  port: 5433
+注意点として、現在の go2_startup.launch.py は video_stream_node に tcp_port: 5432 を渡しています。
+video_stream_node.py もTCPサーバを立てるので、bridge側も 5432 を使うとポート衝突します。まずは 5433 など別ポートにしてください。
+
+3つ目、map上の目的地を送りたいなら、bridge側をこうします。
+
+goal_msg.pose.header.frame_id = "map"
+現在は "odom" です。マップ上の固定地点なら "map" が自然です。
+
+4つ目、tcp_client_standalone.py は現在 while True で1秒ごとに同じGoalを送り続けます。
+テストでは1回だけ送るようにした方が安全です。
+
+if client.send_goal(goal_data):
+    print('goal sent')
+送信後に break する、または while True を外します。
+
+ビルド
+tcp_config.yaml を config/ に追加した場合は、実機環境で再ビルドします。
+
+cd ~/go2_ros2_ws
+colcon build --packages-select go2_navigation
+source install/setup.bash
+実行手順
+端末1で、通常どおりGo2一式を起動します。
+
+cd ~/go2_ros2_ws
+source install/setup.bash
+ros2 launch go2_core go2_startup.launch.py
+RVizが開き、SLAM/Nav2が動いていることを確認します。
+RVizの Navigation2 Goal で手動移動できる状態なら、土台はOKです。
+
+端末2で、Nav2のActionが存在するか確認します。
+
+source ~/go2_ros2_ws/install/setup.bash
+ros2 action list
+この中に以下があればOKです。
+
+/navigate_to_pose
+端末2でTCP bridgeを起動します。
+
+python3 ~/go2_ros2_ws/src/go2_ros2_toolbox/go2_navigation/go2_navigation/navigation_command_tcpbridge.py
+端末3でclientを実行します。
+
+source ~/go2_ros2_ws/install/setup.bash
+python3 ~/go2_ros2_ws/src/go2_ros2_toolbox/go2_navigation/go2_navigation/tcp_client_standalone.py
+この流れで、
+
+tcp_client_standalone.py
+→ TCP送信
+→ navigation_command_tcpbridge.py
+→ /navigate_to_pose
+→ Nav2
+→ /cmd_vel
+→ go2_base
+→ /api/sport/request
+→ Go2移動
+となります。
+
+目的地データ
+tcp_client_standalone.py のこの部分を書き換えて目的地を指定します。
+
+goal_data = {
+    'position': {
+        'x': -6.0,
+        'y': -6.0,
+        'z': 0.0
+    },
+    'orientation': {
+        'x': 0.0,
+        'y': 0.0,
+        'z': 0.0,
+        'w': 1.0
+    }
+}
+orientation は到着時の向きです。正面向きでよければ、まずは z: 0.0, w: 1.0 で試せます。
+
+注意点
+実機で試す前に、必ず開けた場所・低速設定・非常停止できる状態で行ってください。
+また、SLAM中の map は変化することがあるので、巡回のような固定地点運用では、最終的には保存済み地図で localization 運用する方が安定します。
+
+もう1つ大事なのは、clientを何度も実行したり、while True のままにすると、Nav2にGoalを連続投入してしまうことです。最初のテストは「1回だけ送信」で確認するのが安全です。
