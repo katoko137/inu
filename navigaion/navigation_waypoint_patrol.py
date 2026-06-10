@@ -71,6 +71,7 @@ class WaypointPatrol(Node):
         self.completed_laps = 0
         self.current_goal_handle = None
         self.handoff_sent_for_goal = None
+        self.intentional_cancel_generations = set()
         self.route_finished = False
         self.started = False
 
@@ -87,28 +88,37 @@ class WaypointPatrol(Node):
         )
         self.get_logger().info('巡回ルート: ' + ' -> '.join(point['name'] for point in self.route))
 
-    def cancel_current_goal(self, reason=''):
+    def cancel_current_goal(self, reason='', after_cancel=None):
         if self.current_goal_handle is None:
             self.get_logger().info('キャンセル対象のNav2 Goalはありません')
+            if after_cancel is not None and not self.route_finished:
+                after_cancel()
             return
 
         reason_text = f' 理由={reason}' if reason else ''
         self.get_logger().info(f'現在のNav2 Goalをキャンセルします。{reason_text}')
+        if self.active_goal_generation is not None:
+            self.intentional_cancel_generations.add(self.active_goal_generation)
         cancel_future = self.current_goal_handle.cancel_goal_async()
-        cancel_future.add_done_callback(self.cancel_done_callback)
+        cancel_future.add_done_callback(
+            lambda future, callback=after_cancel:
+            self.cancel_done_callback(future, callback)
+        )
         self.current_goal_handle = None
 
-    def cancel_done_callback(self, future):
+    def cancel_done_callback(self, future, after_cancel=None):
         try:
             cancel_response = future.result()
         except Exception as e:
             self.get_logger().error(f'Nav2 Goalキャンセル結果の取得に失敗しました: {str(e)}')
-            return
-
-        if len(cancel_response.goals_canceling) > 0:
-            self.get_logger().info('Nav2 Goalのキャンセル要求が受理されました')
         else:
-            self.get_logger().info('キャンセル対象のNav2 Goalはありませんでした')
+            if len(cancel_response.goals_canceling) > 0:
+                self.get_logger().info('Nav2 Goalのキャンセル要求が受理されました')
+            else:
+                self.get_logger().info('キャンセル対象のNav2 Goalはありませんでした')
+
+        if after_cancel is not None and not self.route_finished:
+            after_cancel()
 
     @staticmethod
     def build_route(
@@ -274,9 +284,14 @@ class WaypointPatrol(Node):
                     f"閾値到達: {waypoint['name']}までの残り距離が"
                     f"{distance:.2f} mになりました。"
                     f"{self.completed_laps}周目が完了したため、"
+                    f"現在のGoalをキャンセルしてから、"
                     f"次の目的地={next_waypoint['name']}へ戻って巡回を継続します"
                 )
-                self.send_goal_by_index(next_index, reason='無限巡回で先頭へ戻る')
+                self.cancel_current_goal(
+                    reason='次の目的地へ切り替えるため',
+                    after_cancel=lambda index=next_index:
+                    self.send_goal_by_index(index, reason='無限巡回で先頭へ戻る')
+                )
                 return
 
             self.get_logger().info(
@@ -290,15 +305,33 @@ class WaypointPatrol(Node):
         self.get_logger().info(
             f"閾値到達: {waypoint['name']}までの残り距離が"
             f"{distance:.2f} mになりました。"
+            f"現在のGoalをキャンセルしてから、"
             f"次の目的地={next_waypoint['name']}を送信します"
         )
-        self.send_goal_by_index(next_index, reason='残り距離が閾値以下')
+        self.cancel_current_goal(
+            reason='次の目的地へ切り替えるため',
+            after_cancel=lambda index=next_index:
+            self.send_goal_by_index(index, reason='残り距離が閾値以下')
+        )
 
     def get_result_callback(self, future, goal_index, goal_generation):
         """目的地への移動が完了したときの最終結果を処理します。"""
         if self.route_finished:
             self.get_logger().debug(
                 f'巡回完了後に届いたNav2結果を無視しました: index={goal_index}, goal_id={goal_generation}'
+            )
+            return
+
+        status = future.result().status
+        waypoint = self.route[goal_index]
+        status_text = self.status_to_text(status)
+
+        if goal_generation in self.intentional_cancel_generations:
+            self.intentional_cancel_generations.discard(goal_generation)
+            self.get_logger().info(
+                f"次の目的地へ切り替えるためにキャンセルしたNav2結果を無視します: "
+                f"目的地={waypoint['name']} / 結果={status_text}({status}) / "
+                f"goal_id={goal_generation}"
             )
             return
 
@@ -310,10 +343,6 @@ class WaypointPatrol(Node):
                 f'古い目的地結果を無視しました: index={goal_index}, goal_id={goal_generation}'
             )
             return
-
-        status = future.result().status
-        waypoint = self.route[goal_index]
-        status_text = self.status_to_text(status)
 
         self.get_logger().info(
             f"Nav2から最終結果を受信: 目的地={waypoint['name']} / "
