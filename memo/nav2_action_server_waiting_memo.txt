@@ -1,0 +1,111 @@
+Nav2 goalコマンドが "Waiting for an action server" のまま止まる場合のメモ
+=====================================================================
+
+状況
+----
+
+`ros2 action send_goal` でNav2へ目的地を送ったとき、最初のGoalは動いたが、
+2回目以降のGoal送信で次のような表示のまま止まる。
+
+    Waiting for an action server to become available...
+
+意味
+----
+
+この表示は、コマンドを実行しているターミナルから
+`/navigate_to_pose` のAction Serverが見えていない、という意味です。
+
+Nav2がGoalを拒否した状態ではありません。
+まだGoal送信まで進めておらず、Action Serverを探して待っている状態です。
+
+考えられる原因
+--------------
+
+1. 実行ターミナルでワークスペースをsourceしていない
+
+別ターミナルで2回目のコマンドを実行した場合、`source` 忘れがよくあります。
+
+    source install/setup.bash
+
+確認:
+
+    ros2 action list
+
+出力に次が含まれているか確認します。
+
+    /navigate_to_pose
+
+2. Nav2、または `bt_navigator` が起動していない、またはactiveではない
+
+`/navigate_to_pose` は主にNav2の `bt_navigator` が提供します。
+
+確認:
+
+    ros2 node list | grep bt_navigator
+    ros2 action list | grep navigate_to_pose
+
+Lifecycle状態も確認できます。
+
+    ros2 lifecycle get /bt_navigator
+    ros2 lifecycle get /controller_server
+    ros2 lifecycle get /planner_server
+
+期待される状態は通常 `active` です。
+
+3. 1回目のGoal後にNav2がエラーやrecoveryで詰まっている
+
+Nav2が完全に落ちていなくても、内部で処理が詰まっている可能性があります。
+
+起動しているlaunch端末に、次のようなログが出ていないか確認します。
+
+    Failed to make progress
+    Goal was aborted
+    Attempting spin
+    bt_navigator
+    controller_server
+
+Actionの状態を見る場合:
+
+    ros2 topic echo /navigate_to_pose/_action/status
+
+4. `ROS_DOMAIN_ID` がターミナル間、またはPC間で違う
+
+別ターミナル、別PC、Docker内などからGoalを送っている場合、
+`ROS_DOMAIN_ID` が違うとAction Serverが見えません。
+
+確認:
+
+    echo $ROS_DOMAIN_ID
+
+Nav2を起動しているターミナルと、Goalを送るターミナルで同じ値にします。
+
+5. ROS 2 daemon、またはDDS discoveryの状態が更新されていない
+
+Action Serverが存在していても、ROS 2側の検出がうまく更新されていない場合があります。
+
+試すコマンド:
+
+    ros2 daemon stop
+    ros2 daemon start
+    ros2 action list
+
+まず確認する順番
+----------------
+
+最初に以下を確認します。
+
+    source install/setup.bash
+    ros2 action list | grep navigate_to_pose
+    ros2 node list | grep bt_navigator
+    ros2 lifecycle get /bt_navigator
+
+`ros2 action list` に `/navigate_to_pose` が出ない場合、
+Goalコマンドの内容以前の問題です。
+
+確認すべきものは次です。
+
+    Nav2が起動しているか
+    bt_navigatorがactiveか
+    workspaceをsourceしているか
+    ROS_DOMAIN_IDが一致しているか
+    DDS discoveryが正常か
