@@ -1,0 +1,74 @@
+1.goal_send 直後にABORTED（go2は停止したまま）
+
+現象：
+goal_send 直後にfinish statusがABORTEDとなる。(go2は停止したまま)
+/rosoutトピックのログに、"send_goal failed"と出てくる。
+
+原因：
+bt_navigatorがplanner_server か contoroller_serverへgoalを送信した際に、返答が来ず、タイムアウトしてしまう。
+
+2.goal_send 直後にSUCCEED（go2は停止したまま）
+現象：
+稀に、goal_send直後にfinish statusがSUCCEEDとなる。（go2は停止したまま）
+
+原因：
+調査中。
+
+3.goal付近で回転、停止
+現象：
+goal付近で回転・停止を繰り返す。
+
+原因：
+内部的にgoal到達判定となっておらず、recovery_serverが動き続けている。
+
+対策：
+設定ファイル内に"go2とgoal地点までの距離が何m以内になったらgoal到達判定とする"という設定項目がある。(設定項目:xy_goal_tolerance、単位:m)
+角度も同様(設定項目:yaw_goal_tolerance、単位:rad)
+これらの閾値を緩和させればこの現象は解消される。
+
+この対策は、同じ場所を繰り返し巡回させるときには効くが、
+巡回中に特定の場所・向きにしたい場合にはべつの対応策が必要となる。
+
+
+
+
+4.goal付近で腰だけ動かす
+現象：
+goal付近に行くと、歩かずに腰だけ動かし続ける。（内部的にgoal到達判定にならない）
+原因：
+デフォルトの挙動として、goalにgo2が近づくごとに減速するようになっている。
+controller_serverから出力される/cmd_vel（速度司令）が"x: 0.157~~~"のような微小な値を出し続ける。
+しかし、go2は足が車輪ではないため、腰を動かすことで微小な移動に対応しようとしてしまう。（go2内部で移動するための最小閾値が設けられている。）
+微小な速度司令
+↓
+腰を動かして対応
+↓
+腰を動かすだけだと現在位置は変化なし
+↓
+微小な速度司令
+のループに入っている。
+対策：
+go2_baseノードが/cmd_vel(トピック)から/api/sport/request(go2本体への移動司令)への変換を担当している。
+go2_base内で、微小な/cmd_velを受けたときに、停止させる or go2の移動できる最小移動速度に変換する どちらかの処理を挟む。
+（nav2_params.yaml内にもこの現象に関連する閾値があるが、使い勝手が悪いためgo2_baseのソースコード書き換えが推奨）
+
+
+
+5.goal_send 直後に回転、停止後に出発
+現象：
+通常、goalがある方向を向いてgoal_sendをすればまっすぐ歩いていく。
+しかし、稀にgoalがある方向をむいてgoal_sendをしても、その場で回転等を何度か挟んでから動き出すことがある。
+原因：
+動作の特徴的にrecovery_serverが動作していることは間違いなさそうだが、何がトリガーになっているか不明。
+
+
+6.goal_send後にfinish statusが帰ってこない
+7.planner_serverが停止しましたポップアップが表示
+現象：
+この表示が出てしまうと、rvizを再起動しないとgoal_sendしてもgo2が動かない。goal_send後feedbackは帰ってくるが、ABORTEDになるか、finish statusが帰ってこない。
+原因：
+rvizを起動後、go2の周辺の地図の作成が不十分のときになるっぽい（確定ではない）
+"地図の作成が不十分"〜"planner_serverが停止"間の処理フロー（なぜplanner_server停止に結びつくのか）調査中。
+
+
+
