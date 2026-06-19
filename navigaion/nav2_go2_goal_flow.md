@@ -31,6 +31,47 @@ Nav2パラメータは、実行時に以下のファイルが使用される。
 /home/unitree/go2_ros2_ws/install/go2_navigation/share/go2_navigation/config/nav2_params.yaml
 ```
 
+## 図の色分け
+
+全フロー図で、同じ色を同じROS 2要素に使用する。
+
+| 色 | 区分 | 意味・例 |
+|---|---|---|
+| 青 | ROS 2ノード | `bt_navigator`、`planner_server`、`go2_base` |
+| 緑 | ROS 2トピック | `/cmd_vel`、`/scan`、`/api/sport/request` |
+| 黄 | ROS 2メッセージ型・データ | `geometry_msgs/msg/Twist`、`nav_msgs/msg/Path` |
+| 紫 | ROS 2 Action | `/navigate_to_pose`、`/compute_path_to_pose`、`/follow_path` |
+| ピンク | TF・座標変換 | `map → odom`、`odom → base_link` |
+| 灰 | 内部処理・プラグイン | Behavior Tree、Navfn、DWB、costmap |
+| オレンジ | 操作者・Go2実機 | 操作者、Go2内蔵モーション制御 |
+
+```mermaid
+flowchart LR
+    L_NODE["ROS 2ノード"]
+    L_TOPIC["ROS 2トピック"]
+    L_MSG["メッセージ型・データ"]
+    L_ACTION["ROS 2 Action"]
+    L_TF["TF・座標変換"]
+    L_PROCESS["内部処理・プラグイン"]
+    L_EXTERNAL["操作者・Go2実機"]
+
+    classDef rosNode fill:#d6eaff,stroke:#2471a3,color:#102a43,stroke-width:2px;
+    classDef rosTopic fill:#d5f5e3,stroke:#1e8449,color:#123524,stroke-width:2px;
+    classDef rosMsg fill:#fcf3cf,stroke:#b7950b,color:#4d3d00,stroke-width:2px;
+    classDef rosAction fill:#eadcf8,stroke:#7d3c98,color:#321442,stroke-width:2px;
+    classDef tfData fill:#fadbd8,stroke:#c0392b,color:#4a1712,stroke-width:2px;
+    classDef process fill:#e5e7e9,stroke:#5d6d7e,color:#1f2933,stroke-width:2px;
+    classDef external fill:#fdebd0,stroke:#ca6f1e,color:#512e0b,stroke-width:2px;
+
+    class L_NODE rosNode;
+    class L_TOPIC rosTopic;
+    class L_MSG rosMsg;
+    class L_ACTION rosAction;
+    class L_TF tfData;
+    class L_PROCESS process;
+    class L_EXTERNAL external;
+```
+
 ## メインフロー
 
 ```mermaid
@@ -38,93 +79,137 @@ flowchart TD
     USER["操作者<br/>RViz上でNav2 Goalを指定"]
 
     subgraph RVIZ["RViz 2"]
-        GOAL_TOOL["nav2_rviz_plugins/GoalTool<br/>目標位置・目標姿勢を作成"]
+        RVIZ_NODE["ノード: rviz2"]
+        GOAL_TOOL["内部処理: nav2_rviz_plugins/GoalTool"]
     end
 
     subgraph NAV2["Nav2"]
-        BTN["bt_navigator<br/>Behavior Tree実行"]
-        BT["navigate_w_replanning_and_recovery.xml<br/>経路計画と追従を管理"]
-        PS["planner_server<br/>GridBased: NavfnPlanner"]
-        GC["global_costmap<br/>map座標系"]
-        PATH["グローバル経路<br/>nav_msgs/Path"]
-        CS["controller_server<br/>FollowPath: DWBLocalPlanner<br/>20 Hz"]
-        LC["local_costmap<br/>odom座標系"]
-        CMD["速度指令<br/>geometry_msgs/Twist"]
+        NAV_ACTION["Action: /navigate_to_pose"]
+        NAV_MSG["Action型: nav2_msgs/action/NavigateToPose"]
+        BTN["ノード: bt_navigator"]
+        BT["内部処理: Behavior Tree<br/>navigate_w_replanning_and_recovery.xml"]
+        COMPUTE_ACTION["Action: /compute_path_to_pose"]
+        COMPUTE_MSG["Action型: nav2_msgs/action/ComputePathToPose"]
+        PS["ノード: planner_server"]
+        NAVFN["プラグイン: GridBased / NavfnPlanner"]
+        GC["内部データ: global_costmap<br/>map座標系"]
+        PLAN_TOPIC["トピック: /plan"]
+        PATH_MSG["メッセージ: nav_msgs/msg/Path"]
+        FOLLOW_ACTION["Action: /follow_path"]
+        FOLLOW_MSG["Action型: nav2_msgs/action/FollowPath"]
+        CS["ノード: controller_server"]
+        DWB["プラグイン: FollowPath / DWBLocalPlanner<br/>20 Hz"]
+        LC["内部データ: local_costmap<br/>odom座標系"]
+        CMD_TOPIC["トピック: /cmd_vel"]
+        TWIST_MSG["メッセージ: geometry_msgs/msg/Twist"]
     end
 
     subgraph BRIDGE["Go2 ROS 2制御"]
-        BASE["go2_base<br/>handleVelocity()"]
-        SPORT["SportClient::Move()<br/>Move API ID: 1008"]
+        BASE["ノード: go2_base"]
+        HANDLE["内部処理: handleVelocity()"]
+        SPORT["内部処理: SportClient::Move()<br/>Move API ID: 1008"]
+        SPORT_TOPIC["トピック: /api/sport/request"]
+        REQUEST_MSG["メッセージ: unitree_api/msg/Request<br/>api_id=1008 / parameter={x,y,z}"]
     end
 
     subgraph ROBOT["Go2本体"]
-        DDS["Unitree DDS / Sport API"]
+        DDS["Go2実機: Unitree DDS / Sport API"]
         MOTION["Go2内蔵モーション制御"]
         MOVE["脚の歩行開始"]
     end
 
-    USER --> GOAL_TOOL
-    GOAL_TOOL -->|"/navigate_to_pose Action<br/>nav2_msgs/action/NavigateToPose"| BTN
+    USER --> RVIZ_NODE
+    RVIZ_NODE --> GOAL_TOOL
+    GOAL_TOOL --> NAV_ACTION
+    NAV_MSG -.-> NAV_ACTION
+    NAV_ACTION --> BTN
     BTN --> BT
 
-    BT -->|"/compute_path_to_pose Action<br/>goal + planner_id=GridBased"| PS
+    BT --> COMPUTE_ACTION
+    COMPUTE_MSG -.-> COMPUTE_ACTION
+    COMPUTE_ACTION -->|goal + planner_id=GridBased| PS
+    PS --> NAVFN
     GC -->|障害物・地図コスト| PS
-    PS -->|"/plan<br/>nav_msgs/msg/Path"| PATH
-    PS -->|Action result内のpath| BT
+    PS --> PLAN_TOPIC
+    PLAN_TOPIC --> PATH_MSG
+    PATH_MSG -->|Action result内のpath| BT
 
-    BT -->|"/follow_path Action<br/>path + controller_id=FollowPath"| CS
-    PATH -.->|RViz表示用| GOAL_TOOL
+    BT --> FOLLOW_ACTION
+    FOLLOW_MSG -.-> FOLLOW_ACTION
+    FOLLOW_ACTION -->|path + controller_id=FollowPath| CS
+    PATH_MSG -.->|RViz表示用| RVIZ_NODE
     LC -->|近傍障害物コスト| CS
-    CS -->|"/cmd_vel<br/>geometry_msgs/msg/Twist"| CMD
+    CS --> DWB
+    DWB --> CMD_TOPIC
+    CMD_TOPIC --> TWIST_MSG
 
-    CMD --> BASE
-    BASE --> SPORT
-    SPORT -->|"/api/sport/request<br/>unitree_api/msg/Request<br/>api_id=1008<br/>parameter={x,y,z}"| DDS
+    TWIST_MSG --> BASE
+    BASE --> HANDLE
+    HANDLE --> SPORT
+    SPORT --> SPORT_TOPIC
+    SPORT_TOPIC --> REQUEST_MSG
+    REQUEST_MSG --> DDS
     DDS --> MOTION
     MOTION --> MOVE
+
+    classDef rosNode fill:#d6eaff,stroke:#2471a3,color:#102a43,stroke-width:2px;
+    classDef rosTopic fill:#d5f5e3,stroke:#1e8449,color:#123524,stroke-width:2px;
+    classDef rosMsg fill:#fcf3cf,stroke:#b7950b,color:#4d3d00,stroke-width:2px;
+    classDef rosAction fill:#eadcf8,stroke:#7d3c98,color:#321442,stroke-width:2px;
+    classDef process fill:#e5e7e9,stroke:#5d6d7e,color:#1f2933,stroke-width:2px;
+    classDef external fill:#fdebd0,stroke:#ca6f1e,color:#512e0b,stroke-width:2px;
+
+    class RVIZ_NODE,BTN,PS,CS,BASE rosNode;
+    class PLAN_TOPIC,CMD_TOPIC,SPORT_TOPIC rosTopic;
+    class NAV_MSG,COMPUTE_MSG,FOLLOW_MSG,PATH_MSG,TWIST_MSG,REQUEST_MSG rosMsg;
+    class NAV_ACTION,COMPUTE_ACTION,FOLLOW_ACTION rosAction;
+    class GOAL_TOOL,BT,NAVFN,GC,DWB,LC,HANDLE,SPORT process;
+    class USER,DDS,MOTION,MOVE external;
 ```
 
 ## 時系列フロー
+
+Mermaidのシーケンス図はフローチャートと同じノード単位の色分けが難しいため、各名称に`[Action]`、`[トピック]`、`[メッセージ]`などの種別を明記している。
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as 操作者
-    participant RViz as rviz2 GoalTool
-    participant BT as bt_navigator
-    participant Planner as planner_server
-    participant GCost as global_costmap
-    participant Controller as controller_server
-    participant LCost as local_costmap
-    participant Base as go2_base
-    participant Sport as Unitree Sport API
-    participant Go2 as Go2本体
+    participant RViz as ノード: rviz2
+    participant BT as ノード: bt_navigator
+    participant Planner as ノード: planner_server
+    participant GCost as 内部データ: global_costmap
+    participant Controller as ノード: controller_server
+    participant LCost as 内部データ: local_costmap
+    participant Base as ノード: go2_base
+    participant Sport as 内部処理: SportClient
+    participant Go2 as 実機: Go2本体
 
     User->>RViz: 地図上で目標位置と向きを指定
-    RViz->>BT: /navigate_to_pose Action Goal
-    Note over RViz,BT: 型: nav2_msgs/action/NavigateToPose<br/>目標は通常map座標系
+    RViz->>BT: [Action] /navigate_to_pose Goal
+    Note over RViz,BT: [Action型] nav2_msgs/action/NavigateToPose<br/>目標は通常map座標系
 
-    BT->>Planner: /compute_path_to_pose Action Goal
+    BT->>Planner: [Action] /compute_path_to_pose Goal
     Note over BT,Planner: planner_id = GridBased
     Planner->>GCost: 現在位置・目標位置・コストを参照
     GCost-->>Planner: global costmap
     Planner->>Planner: NavfnPlannerでグローバル経路を計算
-    Planner-->>BT: 計算済みPath
-    Planner-->>RViz: /planをpublish
+    Planner-->>BT: [メッセージ] nav_msgs/msg/Path
+    Planner-->>RViz: [トピック] /planをpublish
 
-    BT->>Controller: /follow_path Action Goal
-    Note over BT,Controller: controller_id = FollowPath<br/>PathをAction Goal内で渡す
+    BT->>Controller: [Action] /follow_path Goal
+    Note over BT,Controller: controller_id = FollowPath<br/>PathメッセージをAction Goal内で渡す
 
     loop 制御周期 20 Hz
         Controller->>LCost: ロボット周辺の障害物コストを参照
         LCost-->>Controller: local costmap
         Controller->>Controller: DWBで候補軌道を評価
-        Controller->>Base: /cmd_velをpublish
+        Controller->>Base: [トピック] /cmd_vel<br/>[メッセージ] geometry_msgs/msg/Twist
     end
 
     Base->>Base: Twistからvx, vy, vyawを取得
     Base->>Sport: SportClient::Move(req, vx, vy, vyaw)
-    Sport->>Go2: /api/sport/request<br/>Move API ID 1008
+    Sport->>Go2: [トピック] /api/sport/request<br/>[メッセージ] unitree_api/msg/Request<br/>Move API ID 1008
     Go2->>Go2: 速度指令を内蔵歩行制御へ反映
     Go2-->>User: 実際の歩行開始
 ```
@@ -134,55 +219,70 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph SENSOR["Go2センサー入力"]
-        LIDAR_CLOUD["/utlidar/cloud_deskewed<br/>sensor_msgs/PointCloud2"]
-        LIDAR_POSE["/utlidar/robot_pose<br/>geometry_msgs/PoseStamped"]
+        GO2_LIDAR["Go2実機: LiDAR"]
+        LIDAR_CLOUD["トピック: /utlidar/cloud_deskewed"]
+        CLOUD_MSG["メッセージ: sensor_msgs/msg/PointCloud2"]
+        LIDAR_POSE["トピック: /utlidar/robot_pose"]
+        POSE_MSG["メッセージ: geometry_msgs/msg/PoseStamped"]
     end
 
     subgraph PERCEPTION["点群・LaserScan変換"]
-        ACC["cloud_accumulation"]
-        P2L["pointcloud_to_laserscan_node"]
-        SCAN["/scan<br/>sensor_msgs/LaserScan"]
+        ACC["ノード: cloud_accumulation"]
+        TRANS_CLOUD["トピック: /trans_cloud"]
+        P2L["ノード: pointcloud_to_laserscan_node"]
+        SCAN["トピック: /scan"]
+        SCAN_MSG["メッセージ: sensor_msgs/msg/LaserScan"]
     end
 
     subgraph LOCALIZATION["自己位置・TF"]
-        BASE["go2_base"]
-        ODOM["/odom<br/>nav_msgs/Odometry"]
+        BASE["ノード: go2_base"]
+        ODOM["トピック: /odom"]
+        ODOM_MSG["メッセージ: nav_msgs/msg/Odometry"]
         TF_OB["TF: odom → base_link"]
-        SLAM["slam_toolbox"]
-        MAP["/map と /map_updates<br/>nav_msgs/OccupancyGrid"]
+        SLAM["ノード: slam_toolbox"]
+        MAP["トピック: /map と /map_updates"]
+        MAP_MSG["メッセージ: nav_msgs/msg/OccupancyGrid"]
         TF_MO["TF: map → odom"]
     end
 
     subgraph COSTMAPS["Nav2コストマップ"]
-        GLOBAL["global_costmap<br/>static + obstacle + inflation"]
-        LOCAL["local_costmap<br/>voxel + inflation"]
+        GLOBAL["内部データ: global_costmap<br/>static + obstacle + inflation"]
+        LOCAL["内部データ: local_costmap<br/>voxel + inflation"]
     end
 
     subgraph SERVERS["Nav2サーバー"]
-        PLANNER["planner_server"]
-        CONTROLLER["controller_server"]
+        PLANNER["ノード: planner_server"]
+        CONTROLLER["ノード: controller_server"]
     end
 
-    LIDAR_CLOUD --> ACC
-    ACC -->|"/trans_cloud"| P2L
+    GO2_LIDAR --> LIDAR_CLOUD
+    LIDAR_CLOUD --> CLOUD_MSG
+    CLOUD_MSG --> ACC
+    ACC --> TRANS_CLOUD
+    TRANS_CLOUD --> P2L
     P2L --> SCAN
+    SCAN --> SCAN_MSG
 
-    LIDAR_POSE --> BASE
+    GO2_LIDAR --> LIDAR_POSE
+    LIDAR_POSE --> POSE_MSG
+    POSE_MSG --> BASE
     BASE --> ODOM
+    ODOM --> ODOM_MSG
     BASE --> TF_OB
 
-    SCAN --> SLAM
-    ODOM --> SLAM
+    SCAN_MSG --> SLAM
+    ODOM_MSG --> SLAM
     TF_OB --> SLAM
     SLAM --> MAP
+    MAP --> MAP_MSG
     SLAM --> TF_MO
 
-    MAP --> GLOBAL
-    SCAN --> GLOBAL
+    MAP_MSG --> GLOBAL
+    SCAN_MSG --> GLOBAL
     TF_MO --> GLOBAL
     TF_OB --> GLOBAL
 
-    SCAN --> LOCAL
+    SCAN_MSG --> LOCAL
     TF_OB --> LOCAL
 
     GLOBAL --> PLANNER
@@ -190,8 +290,22 @@ flowchart LR
     TF_OB --> PLANNER
 
     LOCAL --> CONTROLLER
-    ODOM --> CONTROLLER
+    ODOM_MSG --> CONTROLLER
     TF_OB --> CONTROLLER
+
+    classDef rosNode fill:#d6eaff,stroke:#2471a3,color:#102a43,stroke-width:2px;
+    classDef rosTopic fill:#d5f5e3,stroke:#1e8449,color:#123524,stroke-width:2px;
+    classDef rosMsg fill:#fcf3cf,stroke:#b7950b,color:#4d3d00,stroke-width:2px;
+    classDef tfData fill:#fadbd8,stroke:#c0392b,color:#4a1712,stroke-width:2px;
+    classDef process fill:#e5e7e9,stroke:#5d6d7e,color:#1f2933,stroke-width:2px;
+    classDef external fill:#fdebd0,stroke:#ca6f1e,color:#512e0b,stroke-width:2px;
+
+    class ACC,P2L,BASE,SLAM,PLANNER,CONTROLLER rosNode;
+    class LIDAR_CLOUD,LIDAR_POSE,TRANS_CLOUD,SCAN,ODOM,MAP rosTopic;
+    class CLOUD_MSG,POSE_MSG,SCAN_MSG,ODOM_MSG,MAP_MSG rosMsg;
+    class TF_OB,TF_MO tfData;
+    class GLOBAL,LOCAL process;
+    class GO2_LIDAR external;
 ```
 
 ## ノードとインターフェース一覧
@@ -246,25 +360,31 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    START["NavigateToPose開始"]
-    PLAN["ComputePathToPose<br/>1 Hzで再計画"]
-    FOLLOW["FollowPath<br/>DWB制御"]
-    CHECK{"ゴール到達?"}
-    DONE["NavigateToPose成功"]
+    START["Action: NavigateToPose開始"]
+    PLAN["Action: ComputePathToPose<br/>1 Hzで再計画"]
+    PLAN_PROCESS["内部処理: Navfnで経路計画"]
+    PATH_DATA["メッセージ: nav_msgs/msg/Path"]
+    FOLLOW["Action: FollowPath"]
+    CONTROL["内部処理: DWB制御"]
+    CHECK{"内部判定: ゴール到達?"}
+    DONE["Action結果: NavigateToPose成功"]
     FAIL{"計画・追従失敗?"}
-    CLEAR_G["global costmapをclear"]
-    CLEAR_L["local costmapをclear"]
+    CLEAR_G["内部処理: global costmapをclear"]
+    CLEAR_L["内部処理: local costmapをclear"]
     RECOVERY["全体Recovery<br/>costmap clear → Spin → Wait"]
-    ABORT["NavigateToPose失敗"]
+    ABORT["Action結果: NavigateToPose失敗"]
 
     START --> PLAN
-    PLAN --> FOLLOW
-    FOLLOW --> CHECK
+    PLAN --> PLAN_PROCESS
+    PLAN_PROCESS --> PATH_DATA
+    PATH_DATA --> FOLLOW
+    FOLLOW --> CONTROL
+    CONTROL --> CHECK
     CHECK -->|いいえ| PLAN
     CHECK -->|はい| DONE
 
-    PLAN --> FAIL
-    FOLLOW --> FAIL
+    PLAN_PROCESS --> FAIL
+    CONTROL --> FAIL
     FAIL -->|計画失敗| CLEAR_G
     FAIL -->|追従失敗| CLEAR_L
     CLEAR_G --> PLAN
@@ -272,6 +392,14 @@ flowchart TD
     FAIL -->|再試行上限| RECOVERY
     RECOVERY --> PLAN
     RECOVERY -->|Recovery上限超過| ABORT
+
+    classDef rosMsg fill:#fcf3cf,stroke:#b7950b,color:#4d3d00,stroke-width:2px;
+    classDef rosAction fill:#eadcf8,stroke:#7d3c98,color:#321442,stroke-width:2px;
+    classDef process fill:#e5e7e9,stroke:#5d6d7e,color:#1f2933,stroke-width:2px;
+
+    class START,PLAN,FOLLOW,DONE,ABORT rosAction;
+    class PATH_DATA rosMsg;
+    class PLAN_PROCESS,CONTROL,CHECK,FAIL,CLEAR_G,CLEAR_L,RECOVERY process;
 ```
 
 ## Go2が動き始める成立条件
@@ -339,4 +467,3 @@ ros2 node info /go2_base
 ros2 run tf2_ros tf2_echo map odom
 ros2 run tf2_ros tf2_echo odom base_link
 ```
-
