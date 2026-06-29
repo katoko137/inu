@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AR Marker Meter Web</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='web_meter_app.css') }}">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <h1>AR Marker Meter Web</h1>
+        <p>サーバー側USBカメラと登録画像でメーター針を検出します。</p>
+      </div>
+      <div class="status-pill" id="globalStatus">準備中</div>
+    </header>
+
+    <nav class="tabs" aria-label="画面切替">
+      <button class="tab-button active" data-tab="register" type="button">登録</button>
+      <button class="tab-button" data-tab="detect" type="button">検出</button>
+    </nav>
+
+    <section class="tab-panel active" id="tab-register">
+      <div class="workspace">
+        <section class="image-pane">
+          <div class="image-frame">
+            <img id="registerImage" alt="登録プレビュー">
+            <div class="empty-hint" id="registerEmpty">登録画像を読み込み中...</div>
+          </div>
+          <div class="image-meta" id="registerMeta">-</div>
+        </section>
+
+        <aside class="control-pane">
+          <div class="control-group">
+            <button id="captureRegisterButton" type="button">カメラから取得</button>
+            <label class="file-button">
+              画像アップロード
+              <input id="uploadRegisterInput" type="file" accept="image/*">
+            </label>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              辞書
+              <select id="dictionaryInput">
+                {% for name in dictionaries %}
+                <option value="{{ name }}">{{ name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              マーカーID
+              <input id="markerIdInput" type="number" value="0" step="1">
+            </label>
+            <label>
+              処理最大幅
+              <input id="maxWidthInput" type="number" value="1280" min="320" max="4000" step="10">
+            </label>
+            <label>
+              カメラ番号
+              <input id="cameraIndexInput" type="number" value="0" min="0" step="1">
+            </label>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              クリック操作
+              <select id="clickModeInput">
+                <option value="center">メーター中心</option>
+                <option value="scale_min">最小目盛り</option>
+                <option value="scale_max">最大目盛り</option>
+              </select>
+            </label>
+            <label>
+              中心 X
+              <input id="centerXInput" type="number" value="0" min="0" step="1">
+            </label>
+            <label>
+              中心 Y
+              <input id="centerYInput" type="number" value="0" min="0" step="1">
+            </label>
+            <label>
+              半径
+              <input id="radiusInput" type="number" value="1" min="1" step="1">
+            </label>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              最小値
+              <input id="scaleMinValueInput" type="number" value="0.0" step="0.000001">
+            </label>
+            <label>
+              最大値
+              <input id="scaleMaxValueInput" type="number" value="0.1" step="0.000001">
+            </label>
+            <label>
+              目盛り方向
+              <select id="scaleDirectionInput">
+                <option value="clockwise">時計回り</option>
+                <option value="counterclockwise">反時計回り</option>
+              </select>
+            </label>
+            <label class="checkbox-row">
+              <input id="drawTextInput" type="checkbox" checked>
+              文字列を描画
+            </label>
+          </div>
+
+          <div class="control-group">
+            <button id="detectMarkerButton" type="button">マーカー検出</button>
+            <button id="autoCircleButton" type="button">メーター円を自動検出</button>
+            <button id="previewNeedleButton" type="button">針検出プレビュー</button>
+            <button id="autoScaleButton" type="button">目盛りを自動設定</button>
+            <button id="clearScaleButton" type="button">目盛りクリア</button>
+            <button id="saveRegistrationButton" class="primary" type="button">登録保存</button>
+          </div>
+
+          <div class="result-box">
+            <h2>登録状態</h2>
+            <pre id="registerResult">-</pre>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-detect">
+      <div class="workspace">
+        <section class="image-pane">
+          <div class="image-frame">
+            <img id="detectImage" alt="検出プレビュー">
+            <div class="empty-hint" id="detectEmpty">開始ボタンでリアルタイム検出を開始します。</div>
+          </div>
+        </section>
+
+        <aside class="control-pane">
+          <div class="form-grid">
+            <label>
+              使用中JSON
+              <select id="configSelectInput"></select>
+            </label>
+            <label>
+              選択状態
+              <input id="selectedConfigInput" type="text" value="-" readonly>
+            </label>
+            <button id="reloadConfigButton" type="button">JSON一覧更新</button>
+          </div>
+          <div class="control-group">
+            <button id="startDetectButton" class="primary" type="button">開始</button>
+            <button id="stopDetectButton" type="button" disabled>停止</button>
+          </div>
+          <div class="form-grid">
+            <label>
+              更新間隔 ms
+              <input id="detectIntervalInput" type="number" value="500" min="200" step="100">
+            </label>
+            <label>
+              カメラ番号
+              <input id="detectCameraIndexInput" type="number" value="0" min="0" step="1">
+            </label>
+          </div>
+
+          <div class="metric-grid">
+            <div class="metric-card wide" id="detectStatusCard">
+              <span>検出状態</span>
+              <strong id="detectStatusValue">-</strong>
+              <small id="detectMessageValue">-</small>
+            </div>
+            <div class="metric-card">
+              <span>指示値</span>
+              <strong id="detectNeedleValue">-</strong>
+            </div>
+            <div class="metric-card">
+              <span>実測FPS</span>
+              <strong id="detectFpsValue">-</strong>
+            </div>
+            <div class="metric-card">
+              <span>マーカー</span>
+              <strong id="detectMarkerValue">-</strong>
+            </div>
+            <div class="metric-card">
+              <span>針角度</span>
+              <strong id="detectAngleValue">-</strong>
+            </div>
+          </div>
+
+          <div class="result-box detail-box">
+            <h2>検出詳細</h2>
+            <dl class="detail-list">
+              <div>
+                <dt>円中心 / 半径</dt>
+                <dd id="detectCircleValue">-</dd>
+              </div>
+              <div>
+                <dt>針先</dt>
+                <dd id="detectNeedleTipValue">-</dd>
+              </div>
+              <div>
+                <dt>目盛り割合</dt>
+                <dd id="detectScaleValue">-</dd>
+              </div>
+              <div>
+                <dt>JSON</dt>
+                <dd id="detectConfigValue">-</dd>
+              </div>
+            </dl>
+          </div>
+
+          <details class="details-box" id="configSettingsDetails">
+            <summary>JSON設定を表示</summary>
+            <dl class="detail-list" id="configSettingsList"></dl>
+            <pre id="configRawJson">-</pre>
+          </details>
+
+          <details class="details-box">
+            <summary>Raw JSONを表示</summary>
+            <pre id="detectResult">-</pre>
+          </details>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    window.DEFAULT_CONFIG_PATH = {{ default_config_path|tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='web_meter_app.js') }}"></script>
+</body>
+</html>
